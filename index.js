@@ -72,6 +72,41 @@ const TICKET_TYPES = {
 };
 
 // ---------------------------------------------------------------
+// STATE: koji tipovi tiketa su TRENUTNO zatvoreni (dugme onemoguceno)
+// Persista u JSON file-u izmedju startova
+// ---------------------------------------------------------------
+const STATE_FILE = path.join(__dirname, "botState.json");
+let disabledTypes = new Set();
+
+function loadState() {
+  try {
+    if (fs.existsSync(STATE_FILE)) {
+      const raw = fs.readFileSync(STATE_FILE, "utf8");
+      const data = JSON.parse(raw);
+      disabledTypes = new Set(data.disabledTypes || []);
+      console.log(
+        `State ucitan: onemogucena su ${disabledTypes.size} tipova tiketa`
+      );
+    }
+  } catch (err) {
+    console.error("Greska pri ucitavanju state-a:", err);
+  }
+}
+
+function saveState() {
+  try {
+    fs.writeFileSync(
+      STATE_FILE,
+      JSON.stringify({ disabledTypes: [...disabledTypes] }, null, 2)
+    );
+  } catch (err) {
+    console.error("Greska pri snimanju state-a:", err);
+  }
+}
+
+loadState();
+
+// ---------------------------------------------------------------
 // Helper: da li user ima bilo koju staff rolu
 // ---------------------------------------------------------------
 function isStaff(member) {
@@ -212,18 +247,11 @@ function getTicketInfo(channel) {
 }
 
 // ---------------------------------------------------------------
-// Helper: ZATVORI tiket (transcript + log + DM + arhiviraj)
-// Kanal NE brisemo - samo skine permisije vlasniku, preimenuje,
-// i oznaci status:closed u topic.
+// Helper: ZATVORI individualni tiket (transcript + log + DM + obrisi kanal)
 // ---------------------------------------------------------------
 async function closeTicket(channel, closedBy) {
   const info = getTicketInfo(channel);
   const ownerId = info ? info.ownerId : null;
-
-  if (info && info.closed) {
-    // Vec je zatvoren - ne radi nista
-    return false;
-  }
 
   // Generiraj transcript
   let transcript;
@@ -296,132 +324,64 @@ async function closeTicket(channel, closedBy) {
     }
   }
 
-  // ARHIVIRAJ: skini owneru view/send permisije
-  if (ownerId) {
-    try {
-      await channel.permissionOverwrites.edit(ownerId, {
-        ViewChannel: false,
-        SendMessages: false
-      });
-    } catch (err) {
-      console.error("Greska pri oduzimanju permisija:", err);
-    }
-  }
-
-  // Preimenuj kanal (closed- prefix)
-  try {
-    if (!channel.name.startsWith("closed-")) {
-      await channel.setName(`closed-${channel.name}`.slice(0, 100));
-    }
-  } catch (err) {
-    console.error("Greska pri preimenovanju kanala:", err);
-  }
-
-  // Oznaci status:closed u topic-u
-  try {
-    const newTopic = (channel.topic || "") + " status:closed";
-    await channel.setTopic(newTopic.trim());
-  } catch (err) {
-    console.error("Greska pri azuriranju topic-a:", err);
-  }
-
-  // Finalna poruka u kanalu (samo staff ga jos vidi)
+  // Obrisi kanal
   try {
     await channel.send({
       embeds: [
         new EmbedBuilder()
           .setColor(config.colors.danger)
-          .setTitle("Tiket arhiviran")
-          .setDescription(
-            `Tiket zatvorio ${closedBy}. Korisnik vise ne vidi ovaj kanal.\n` +
-              `Za ponovno otvaranje koristi **/otvori** u ovom kanalu.`
-          )
+          .setDescription("Kanal ce biti obrisan za 5 sekundi...")
       ]
     });
+    setTimeout(() => {
+      channel.delete("Tiket zatvoren").catch(() => {});
+    }, 5000);
   } catch (err) {
-    console.error("Greska pri slanju finalne poruke:", err);
+    console.error("Greska pri brisanju kanala:", err);
   }
 
   return true;
 }
 
 // ---------------------------------------------------------------
-// Helper: OTVORI ponovo arhivirani tiket
-// ---------------------------------------------------------------
-async function reopenTicket(channel, reopenedBy) {
-  const info = getTicketInfo(channel);
-  if (!info) return { ok: false, reason: "not_ticket" };
-  if (!info.closed) return { ok: false, reason: "not_closed" };
-
-  const ownerId = info.ownerId;
-
-  // Vrati owneru view/send permisije
-  try {
-    await channel.permissionOverwrites.edit(ownerId, {
-      ViewChannel: true,
-      SendMessages: true,
-      ReadMessageHistory: true,
-      AttachFiles: true,
-      EmbedLinks: true
-    });
-  } catch (err) {
-    console.error("Greska pri vracanju permisija:", err);
-  }
-
-  // Preimenuj nazad (makni closed- prefix)
-  try {
-    if (channel.name.startsWith("closed-")) {
-      await channel.setName(channel.name.replace(/^closed-/, ""));
-    }
-  } catch (err) {
-    console.error("Greska pri preimenovanju:", err);
-  }
-
-  // Skini status:closed iz topic-a
-  try {
-    const newTopic = (channel.topic || "").replace(/\s*status:closed/g, "").trim();
-    await channel.setTopic(newTopic);
-  } catch (err) {
-    console.error("Greska pri azuriranju topic-a:", err);
-  }
-
-  // Poruka u kanalu
-  try {
-    await channel.send({
-      content: `<@${ownerId}>`,
-      embeds: [
-        new EmbedBuilder()
-          .setColor(config.colors.success)
-          .setTitle("Tiket ponovo otvoren")
-          .setDescription(
-            `Tiket je ponovo otvorio ${reopenedBy}. Mozes nastavit razgovor.`
-          )
-      ]
-    });
-  } catch (err) {
-    console.error("Greska pri slanju poruke:", err);
-  }
-
-  return { ok: true, ownerId };
-}
-
-// ---------------------------------------------------------------
 // Slash komande - definicije (auto-register na startup)
 // ---------------------------------------------------------------
+const TIP_CHOICES = [
+  { name: "Donacije", value: "donacije" },
+  { name: "Prijave za staff", value: "prijave" },
+  { name: "Ostali tiketi", value: "ostalo" }
+];
+
 const slashCommands = [
   new SlashCommandBuilder()
     .setName("close")
-    .setDescription("Zatvori trenutni tiket kanal (alias za /zatvori)")
+    .setDescription("Zatvori trenutni tiket kanal (staff only)")
     .setDMPermission(false),
 
   new SlashCommandBuilder()
     .setName("zatvori")
-    .setDescription("Zatvori (arhiviraj) trenutni tiket")
+    .setDescription("Zatvori dugme za odredjeni tip tiketa - niko ne moze otvorit taj tip")
+    .addStringOption(opt =>
+      opt
+        .setName("tip")
+        .setDescription("Koji tip tiketa zatvaras")
+        .setRequired(true)
+        .addChoices(...TIP_CHOICES)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .setDMPermission(false),
 
   new SlashCommandBuilder()
     .setName("otvori")
-    .setDescription("Ponovo otvori arhivirani tiket")
+    .setDescription("Ponovo omoguci dugme za odredjeni tip tiketa")
+    .addStringOption(opt =>
+      opt
+        .setName("tip")
+        .setDescription("Koji tip tiketa otvaras")
+        .setRequired(true)
+        .addChoices(...TIP_CHOICES)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .setDMPermission(false),
 
   new SlashCommandBuilder()
@@ -556,6 +516,14 @@ client.on(Events.InteractionCreate, async interaction => {
         });
       }
 
+      // Provjeri da li je tip ZATVOREN (kroz /zatvori komandu)
+      if (disabledTypes.has(typeKey)) {
+        return interaction.reply({
+          content: `Otvaranje **${type.label}** tiketa je trenutno **zatvoreno**. Pokusaj kasnije.`,
+          ephemeral: true
+        });
+      }
+
       await interaction.deferReply({ ephemeral: true });
 
       // Per-type config
@@ -568,7 +536,7 @@ client.on(Events.InteractionCreate, async interaction => {
       const typeCategoryId = typeConfig.categoryId;
       const typeStaffRoleIds = typeConfig.staffRoleIds || [];
 
-      // Provjeri da user nema vec tiket istog tipa (aktivan ILI arhiviran)
+      // Provjeri da user nema vec OTVOREN tiket istog tipa
       const existing = interaction.guild.channels.cache.find(ch => {
         if (ch.parentId !== typeCategoryId) return false;
         const info = getTicketInfo(ch);
@@ -578,13 +546,6 @@ client.on(Events.InteractionCreate, async interaction => {
         );
       });
       if (existing) {
-        const info = getTicketInfo(existing);
-        if (info && info.closed) {
-          return interaction.editReply({
-            content:
-              `Vec imas ZATVOREN tiket ovog tipa (${existing.name}). Staff ga mora ponovo otvorit preko /otvori ili obrisat.`
-          });
-        }
         return interaction.editReply({
           content: `Vec imas otvoren tiket: ${existing}`
         });
@@ -750,18 +711,13 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isChatInputCommand()) {
     const cmd = interaction.commandName;
 
-    if (cmd === "close" || cmd === "zatvori") {
+    // /close - zatvori INDIVIDUALNI trenutni tiket (obrise kanal)
+    if (cmd === "close") {
       const ch = interaction.channel;
       const info = getTicketInfo(ch);
       if (!info) {
         return interaction.reply({
           content: "Ovu komandu mozes koristit samo unutar tiket kanala.",
-          ephemeral: true
-        });
-      }
-      if (info.closed) {
-        return interaction.reply({
-          content: "Ovaj tiket je vec zatvoren. Koristi /otvori da ga vratis.",
           ephemeral: true
         });
       }
@@ -786,38 +742,77 @@ client.on(Events.InteractionCreate, async interaction => {
       return;
     }
 
-    if (cmd === "otvori") {
-      const ch = interaction.channel;
-      const info = getTicketInfo(ch);
-      if (!info) {
+    // /zatvori tip:<type> - ONEMOGUCI dugme za otvaranje tog tipa
+    if (cmd === "zatvori") {
+      if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
         return interaction.reply({
-          content: "Ovu komandu mozes koristit samo u tiket kanalu.",
+          content: "Nemas permisiju za ovu komandu.",
           ephemeral: true
         });
       }
-      if (!info.closed) {
+      const tip = interaction.options.getString("tip", true);
+      const type = TICKET_TYPES[tip];
+      if (!type) {
         return interaction.reply({
-          content: "Ovaj tiket nije zatvoren.",
+          content: `Nepoznat tip: ${tip}`,
           ephemeral: true
         });
       }
-      if (!isStaff(interaction.member)) {
+      if (disabledTypes.has(tip)) {
         return interaction.reply({
-          content: "Samo staff moze ponovo otvorit tiket.",
+          content: `**${type.label}** su vec zatvoreni.`,
           ephemeral: true
         });
       }
-
-      const result = await reopenTicket(ch, interaction.user);
-      if (result.ok) {
-        return interaction.reply({
-          content: `Tiket ponovo otvoren. Vlasnik (<@${result.ownerId}>) opet ima pristup.`,
-          ephemeral: true
-        });
-      }
+      disabledTypes.add(tip);
+      saveState();
       return interaction.reply({
-        content: "Nisam uspio otvoriti tiket.",
-        ephemeral: true
+        embeds: [
+          new EmbedBuilder()
+            .setColor(config.colors.danger)
+            .setTitle("Tip tiketa zatvoren")
+            .setDescription(
+              `Dugme za **${type.label}** je onemoguceno.\nNiko ne moze otvorit novi tiket tog tipa dok ne koristis \`/otvori tip:${tip}\`.`
+            )
+            .setFooter({ text: `Zatvorio: ${interaction.user.tag}` })
+        ]
+      });
+    }
+
+    // /otvori tip:<type> - OMOGUCI dugme za tip
+    if (cmd === "otvori") {
+      if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({
+          content: "Nemas permisiju za ovu komandu.",
+          ephemeral: true
+        });
+      }
+      const tip = interaction.options.getString("tip", true);
+      const type = TICKET_TYPES[tip];
+      if (!type) {
+        return interaction.reply({
+          content: `Nepoznat tip: ${tip}`,
+          ephemeral: true
+        });
+      }
+      if (!disabledTypes.has(tip)) {
+        return interaction.reply({
+          content: `**${type.label}** su vec otvoreni.`,
+          ephemeral: true
+        });
+      }
+      disabledTypes.delete(tip);
+      saveState();
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(config.colors.success)
+            .setTitle("Tip tiketa otvoren")
+            .setDescription(
+              `Dugme za **${type.label}** je ponovo omoguceno.\nKorisnici mogu otvorit nove tikete tog tipa.`
+            )
+            .setFooter({ text: `Otvorio: ${interaction.user.tag}` })
+        ]
       });
     }
 
