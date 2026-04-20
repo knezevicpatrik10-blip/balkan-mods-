@@ -190,13 +190,33 @@ async function createTranscript(channel) {
 }
 
 // ---------------------------------------------------------------
-// Helper: zatvori tiket (transcript + log + DM + delete)
+// Helper: je li kanal tiket (i je li vec zatvoren)
+// ---------------------------------------------------------------
+function getTicketInfo(channel) {
+  if (!channel || !channel.topic) return null;
+  const ownerMatch = channel.topic.match(/owner:(\d+)/);
+  const typeMatch = channel.topic.match(/tip:(\w+)/);
+  if (!ownerMatch) return null;
+  return {
+    ownerId: ownerMatch[1],
+    type: typeMatch ? typeMatch[1] : null,
+    closed: channel.topic.includes("status:closed")
+  };
+}
+
+// ---------------------------------------------------------------
+// Helper: ZATVORI tiket (transcript + log + DM + arhiviraj)
+// Kanal NE brisemo - samo skine permisije vlasniku, preimenuje,
+// i oznaci status:closed u topic.
 // ---------------------------------------------------------------
 async function closeTicket(channel, closedBy) {
-  // Izvuci ID opener-a iz topic-a kanala
-  const topic = channel.topic || "";
-  const match = topic.match(/owner:(\d+)/);
-  const ownerId = match ? match[1] : null;
+  const info = getTicketInfo(channel);
+  const ownerId = info ? info.ownerId : null;
+
+  if (info && info.closed) {
+    // Vec je zatvoren - ne radi nista
+    return false;
+  }
 
   // Generiraj transcript
   let transcript;
@@ -245,7 +265,6 @@ async function closeTicket(channel, closedBy) {
     try {
       const owner = await client.users.fetch(ownerId).catch(() => null);
       if (owner) {
-        // Moramo regenerirat transcript jer je vec poslat kao attachment (jednokratno)
         const transcriptForDm = await createTranscript(channel).catch(
           () => null
         );
@@ -255,10 +274,7 @@ async function closeTicket(channel, closedBy) {
           .setDescription(
             `Tiket **${channel.name}** je zatvoren. U prilogu ti saljem transcript razgovora.`
           )
-          .addFields({
-            name: "Zatvorio",
-            value: `${closedBy.tag}`
-          })
+          .addFields({ name: "Zatvorio", value: `${closedBy.tag}` })
           .setTimestamp();
 
         await owner
@@ -266,30 +282,120 @@ async function closeTicket(channel, closedBy) {
             embeds: [dmEmbed],
             files: transcriptForDm ? [transcriptForDm] : []
           })
-          .catch(() => {
-            // user ima zatvorene DM-ove - ignore
-          });
+          .catch(() => {});
       }
     } catch (err) {
       console.error("Greska pri slanju DM-a otvaracu:", err);
     }
   }
 
-  // Obrisi kanal
+  // ARHIVIRAJ: skini owneru view/send permisije
+  if (ownerId) {
+    try {
+      await channel.permissionOverwrites.edit(ownerId, {
+        ViewChannel: false,
+        SendMessages: false
+      });
+    } catch (err) {
+      console.error("Greska pri oduzimanju permisija:", err);
+    }
+  }
+
+  // Preimenuj kanal (closed- prefix)
+  try {
+    if (!channel.name.startsWith("closed-")) {
+      await channel.setName(`closed-${channel.name}`.slice(0, 100));
+    }
+  } catch (err) {
+    console.error("Greska pri preimenovanju kanala:", err);
+  }
+
+  // Oznaci status:closed u topic-u
+  try {
+    const newTopic = (channel.topic || "") + " status:closed";
+    await channel.setTopic(newTopic.trim());
+  } catch (err) {
+    console.error("Greska pri azuriranju topic-a:", err);
+  }
+
+  // Finalna poruka u kanalu (samo staff ga jos vidi)
   try {
     await channel.send({
       embeds: [
         new EmbedBuilder()
           .setColor(config.colors.danger)
-          .setDescription("Kanal ce biti obrisan za 5 sekundi...")
+          .setTitle("Tiket arhiviran")
+          .setDescription(
+            `Tiket zatvorio ${closedBy}. Korisnik vise ne vidi ovaj kanal.\n` +
+              `Za ponovno otvaranje koristi **/otvori** u ovom kanalu.`
+          )
       ]
     });
-    setTimeout(() => {
-      channel.delete("Tiket zatvoren").catch(() => {});
-    }, 5000);
   } catch (err) {
-    console.error("Greska pri brisanju kanala:", err);
+    console.error("Greska pri slanju finalne poruke:", err);
   }
+
+  return true;
+}
+
+// ---------------------------------------------------------------
+// Helper: OTVORI ponovo arhivirani tiket
+// ---------------------------------------------------------------
+async function reopenTicket(channel, reopenedBy) {
+  const info = getTicketInfo(channel);
+  if (!info) return { ok: false, reason: "not_ticket" };
+  if (!info.closed) return { ok: false, reason: "not_closed" };
+
+  const ownerId = info.ownerId;
+
+  // Vrati owneru view/send permisije
+  try {
+    await channel.permissionOverwrites.edit(ownerId, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+      AttachFiles: true,
+      EmbedLinks: true
+    });
+  } catch (err) {
+    console.error("Greska pri vracanju permisija:", err);
+  }
+
+  // Preimenuj nazad (makni closed- prefix)
+  try {
+    if (channel.name.startsWith("closed-")) {
+      await channel.setName(channel.name.replace(/^closed-/, ""));
+    }
+  } catch (err) {
+    console.error("Greska pri preimenovanju:", err);
+  }
+
+  // Skini status:closed iz topic-a
+  try {
+    const newTopic = (channel.topic || "").replace(/\s*status:closed/g, "").trim();
+    await channel.setTopic(newTopic);
+  } catch (err) {
+    console.error("Greska pri azuriranju topic-a:", err);
+  }
+
+  // Poruka u kanalu
+  try {
+    await channel.send({
+      content: `<@${ownerId}>`,
+      embeds: [
+        new EmbedBuilder()
+          .setColor(config.colors.success)
+          .setTitle("Tiket ponovo otvoren")
+          .setDescription(
+            `Tiket je ponovo otvorio ${reopenedBy}. Mozes nastavit razgovor.`
+          )
+      ]
+    });
+  } catch (err) {
+    console.error("Greska pri slanju poruke:", err);
+  }
+
+  return { ok: true, ownerId };
 }
 
 // ---------------------------------------------------------------
@@ -298,7 +404,17 @@ async function closeTicket(channel, closedBy) {
 const slashCommands = [
   new SlashCommandBuilder()
     .setName("close")
-    .setDescription("Zatvori trenutni tiket kanal")
+    .setDescription("Zatvori trenutni tiket kanal (alias za /zatvori)")
+    .setDMPermission(false),
+
+  new SlashCommandBuilder()
+    .setName("zatvori")
+    .setDescription("Zatvori (arhiviraj) trenutni tiket")
+    .setDMPermission(false),
+
+  new SlashCommandBuilder()
+    .setName("otvori")
+    .setDescription("Ponovo otvori arhivirani tiket")
     .setDMPermission(false),
 
   new SlashCommandBuilder()
@@ -435,15 +551,23 @@ client.on(Events.InteractionCreate, async interaction => {
 
       await interaction.deferReply({ ephemeral: true });
 
-      // Provjeri da user nema vec otvoren tiket istog tipa
-      const existing = interaction.guild.channels.cache.find(
-        ch =>
-          ch.parentId === config.ticketCategoryId &&
-          ch.topic &&
-          ch.topic.includes(`owner:${interaction.user.id}`) &&
-          ch.name.startsWith(`${type.prefix}-`)
-      );
+      // Provjeri da user nema vec tiket istog tipa (aktivan ILI arhiviran)
+      const existing = interaction.guild.channels.cache.find(ch => {
+        if (ch.parentId !== config.ticketCategoryId) return false;
+        const info = getTicketInfo(ch);
+        if (!info) return false;
+        return (
+          info.ownerId === interaction.user.id && info.type === typeKey
+        );
+      });
       if (existing) {
+        const info = getTicketInfo(existing);
+        if (info && info.closed) {
+          return interaction.editReply({
+            content:
+              `Vec imas ZATVOREN tiket ovog tipa (${existing.name}). Staff ga mora ponovo otvorit preko /otvori ili obrisat.`
+          });
+        }
         return interaction.editReply({
           content: `Vec imas otvoren tiket: ${existing}`
         });
@@ -608,18 +732,24 @@ client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isChatInputCommand()) {
     const cmd = interaction.commandName;
 
-    if (cmd === "close") {
+    if (cmd === "close" || cmd === "zatvori") {
       const ch = interaction.channel;
-      if (!ch || !ch.topic || !ch.topic.includes("owner:")) {
+      const info = getTicketInfo(ch);
+      if (!info) {
         return interaction.reply({
           content: "Ovu komandu mozes koristit samo unutar tiket kanala.",
           ephemeral: true
         });
       }
-
-      if (!isStaff(interaction.member)) {
+      if (info.closed) {
         return interaction.reply({
-          content: "Samo staff moze zatvorit tiket ovom komandom.",
+          content: "Ovaj tiket je vec zatvoren. Koristi /otvori da ga vratis.",
+          ephemeral: true
+        });
+      }
+      if (!isStaff(interaction.member) && interaction.user.id !== info.ownerId) {
+        return interaction.reply({
+          content: "Samo staff ili vlasnik tiketa moze ga zatvorit.",
           ephemeral: true
         });
       }
@@ -636,6 +766,41 @@ client.on(Events.InteractionCreate, async interaction => {
 
       await closeTicket(ch, interaction.user);
       return;
+    }
+
+    if (cmd === "otvori") {
+      const ch = interaction.channel;
+      const info = getTicketInfo(ch);
+      if (!info) {
+        return interaction.reply({
+          content: "Ovu komandu mozes koristit samo u tiket kanalu.",
+          ephemeral: true
+        });
+      }
+      if (!info.closed) {
+        return interaction.reply({
+          content: "Ovaj tiket nije zatvoren.",
+          ephemeral: true
+        });
+      }
+      if (!isStaff(interaction.member)) {
+        return interaction.reply({
+          content: "Samo staff moze ponovo otvorit tiket.",
+          ephemeral: true
+        });
+      }
+
+      const result = await reopenTicket(ch, interaction.user);
+      if (result.ok) {
+        return interaction.reply({
+          content: `Tiket ponovo otvoren. Vlasnik (<@${result.ownerId}>) opet ima pristup.`,
+          ephemeral: true
+        });
+      }
+      return interaction.reply({
+        content: "Nisam uspio otvoriti tiket.",
+        ephemeral: true
+      });
     }
 
     if (cmd === "setup-ticket-panel") {
