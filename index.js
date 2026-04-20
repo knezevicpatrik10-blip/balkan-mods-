@@ -19,7 +19,8 @@ const {
   AttachmentBuilder,
   REST,
   Routes,
-  SlashCommandBuilder
+  SlashCommandBuilder,
+  ActivityType
 } = require("discord.js");
 const discordTranscripts = require("discord-html-transcripts");
 
@@ -432,6 +433,29 @@ async function registerCommands(clientId, guildId) {
 }
 
 // ---------------------------------------------------------------
+// Helper: prebroji ljude (bez botova) i azuriraj bot activity
+// ---------------------------------------------------------------
+async function updateMemberCountPresence() {
+  try {
+    const guildId = process.env.GUILD_ID;
+    const guild = guildId
+      ? client.guilds.cache.get(guildId)
+      : client.guilds.cache.first();
+    if (!guild) return;
+
+    // Fetch da cache bude svjez (potrebno za tacan broj)
+    await guild.members.fetch().catch(() => null);
+    const humans = guild.members.cache.filter(m => !m.user.bot).size;
+
+    client.user.setActivity(`${humans} ljudi na serveru`, {
+      type: ActivityType.Watching
+    });
+  } catch (err) {
+    console.error("Greska pri azuriranju presence:", err);
+  }
+}
+
+// ---------------------------------------------------------------
 // EVENT: Ready
 // ---------------------------------------------------------------
 client.once(Events.ClientReady, async c => {
@@ -439,12 +463,21 @@ client.once(Events.ClientReady, async c => {
   const clientId = process.env.CLIENT_ID || c.user.id;
   const guildId = process.env.GUILD_ID || null;
   await registerCommands(clientId, guildId);
+  await updateMemberCountPresence();
+
+  // Osvjezavanje svakih 10 minuta kao safety net
+  setInterval(updateMemberCountPresence, 10 * 60 * 1000);
 });
 
 // ---------------------------------------------------------------
-// EVENT: Novi clan - DOBRODOSLICA
+// EVENT: Novi clan - DOBRODOSLICA + update activity
 // ---------------------------------------------------------------
 client.on(Events.GuildMemberAdd, async member => {
+  // Azuriraj broj ljudi (samo ako nije bot)
+  if (!member.user.bot) {
+    updateMemberCountPresence();
+  }
+
   try {
     const channel = await member.guild.channels
       .fetch(config.welcomeChannelId)
@@ -464,6 +497,14 @@ client.on(Events.GuildMemberAdd, async member => {
   } catch (err) {
     console.error("Greska u welcome event:", err);
   }
+});
+
+// ---------------------------------------------------------------
+// EVENT: Clan napusti server - update activity
+// ---------------------------------------------------------------
+client.on(Events.GuildMemberRemove, async member => {
+  if (!member.user || member.user.bot) return;
+  updateMemberCountPresence();
 });
 
 // ---------------------------------------------------------------
