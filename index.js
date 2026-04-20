@@ -78,6 +78,8 @@ const TICKET_TYPES = {
 // ---------------------------------------------------------------
 const STATE_FILE = path.join(__dirname, "botState.json");
 let disabledTypes = new Set();
+let panelMessageId = null;
+let panelChannelId = null;
 
 function loadState() {
   try {
@@ -85,6 +87,8 @@ function loadState() {
       const raw = fs.readFileSync(STATE_FILE, "utf8");
       const data = JSON.parse(raw);
       disabledTypes = new Set(data.disabledTypes || []);
+      panelMessageId = data.panelMessageId || null;
+      panelChannelId = data.panelChannelId || null;
       console.log(
         `State ucitan: onemogucena su ${disabledTypes.size} tipova tiketa`
       );
@@ -98,7 +102,15 @@ function saveState() {
   try {
     fs.writeFileSync(
       STATE_FILE,
-      JSON.stringify({ disabledTypes: [...disabledTypes] }, null, 2)
+      JSON.stringify(
+        {
+          disabledTypes: [...disabledTypes],
+          panelMessageId,
+          panelChannelId
+        },
+        null,
+        2
+      )
     );
   } catch (err) {
     console.error("Greska pri snimanju state-a:", err);
@@ -136,22 +148,50 @@ function buildTicketPanel() {
         "Ostali tiketi - pitanja, molbe, ostalo"
     );
 
+  function makeBtn(key) {
+    const t = TICKET_TYPES[key];
+    const isClosed = disabledTypes.has(key);
+    const btn = new ButtonBuilder().setCustomId(`ticket_create_${key}`);
+    if (isClosed) {
+      btn
+        .setLabel(`${t.label} (zatvoreno)`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true);
+    } else {
+      btn.setLabel(t.label).setStyle(t.style);
+    }
+    return btn;
+  }
+
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("ticket_create_donacije")
-      .setLabel(TICKET_TYPES.donacije.label)
-      .setStyle(TICKET_TYPES.donacije.style),
-    new ButtonBuilder()
-      .setCustomId("ticket_create_prijave")
-      .setLabel(TICKET_TYPES.prijave.label)
-      .setStyle(TICKET_TYPES.prijave.style),
-    new ButtonBuilder()
-      .setCustomId("ticket_create_ostalo")
-      .setLabel(TICKET_TYPES.ostalo.label)
-      .setStyle(TICKET_TYPES.ostalo.style)
+    makeBtn("donacije"),
+    makeBtn("prijave"),
+    makeBtn("ostalo")
   );
 
   return { embeds: [embed], components: [row] };
+}
+
+// ---------------------------------------------------------------
+// Helper: osvjezi postojeci panel (kad /zatvori ili /otvori)
+// ---------------------------------------------------------------
+async function refreshTicketPanel() {
+  if (!panelMessageId || !panelChannelId) return false;
+  try {
+    const channel = await client.channels
+      .fetch(panelChannelId)
+      .catch(() => null);
+    if (!channel || !channel.isTextBased()) return false;
+    const msg = await channel.messages
+      .fetch(panelMessageId)
+      .catch(() => null);
+    if (!msg) return false;
+    await msg.edit(buildTicketPanel());
+    return true;
+  } catch (err) {
+    console.error("Greska pri osvjezavanju panela:", err);
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------
@@ -807,13 +847,15 @@ client.on(Events.InteractionCreate, async interaction => {
       }
       disabledTypes.add(tip);
       saveState();
+      const refreshed = await refreshTicketPanel();
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
             .setColor(config.colors.danger)
             .setTitle("Tip tiketa zatvoren")
             .setDescription(
-              `Dugme za **${type.label}** je onemoguceno.\nNiko ne moze otvorit novi tiket tog tipa dok ne koristis \`/otvori tip:${tip}\`.`
+              `Dugme za **${type.label}** je onemoguceno.\nNiko ne moze otvorit novi tiket tog tipa dok ne koristis \`/otvori tip:${tip}\`.` +
+                (refreshed ? "" : "\n\nNapomena: nisam nasao panel poruku za auto-update. Pokreni /setup-ticket-panel da ga postavim ponovo.")
             )
             .setFooter({ text: `Zatvorio: ${interaction.user.tag}` })
         ]
@@ -844,13 +886,15 @@ client.on(Events.InteractionCreate, async interaction => {
       }
       disabledTypes.delete(tip);
       saveState();
+      const refreshed2 = await refreshTicketPanel();
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
             .setColor(config.colors.success)
             .setTitle("Tip tiketa otvoren")
             .setDescription(
-              `Dugme za **${type.label}** je ponovo omoguceno.\nKorisnici mogu otvorit nove tikete tog tipa.`
+              `Dugme za **${type.label}** je ponovo omoguceno.\nKorisnici mogu otvorit nove tikete tog tipa.` +
+                (refreshed2 ? "" : "\n\nNapomena: nisam nasao panel poruku za auto-update. Pokreni /setup-ticket-panel da ga postavim ponovo.")
             )
             .setFooter({ text: `Otvorio: ${interaction.user.tag}` })
         ]
@@ -877,9 +921,12 @@ client.on(Events.InteractionCreate, async interaction => {
         });
       }
 
-      await target.send(buildTicketPanel());
+      const sent = await target.send(buildTicketPanel());
+      panelMessageId = sent.id;
+      panelChannelId = target.id;
+      saveState();
       return interaction.reply({
-        content: `Panel postavljen u ${target}.`,
+        content: `Panel postavljen u ${target}. Dugmad ce se auto-osvjezavat na /zatvori i /otvori.`,
         ephemeral: true
       });
     }
