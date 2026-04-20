@@ -72,11 +72,18 @@ const TICKET_TYPES = {
 };
 
 // ---------------------------------------------------------------
-// Helper: da li user ima staff role iz configa
+// Helper: da li user ima bilo koju staff rolu
 // ---------------------------------------------------------------
 function isStaff(member) {
   if (!member) return false;
-  return config.staffRoleIds.some(id => member.roles.cache.has(id));
+  return config.allStaffRoleIds.some(id => member.roles.cache.has(id));
+}
+
+// ---------------------------------------------------------------
+// Helper: skup svih ticketCategoryId-eva (za scan postojecih tiketa)
+// ---------------------------------------------------------------
+function allTicketCategoryIds() {
+  return Object.values(config.ticketTypes).map(t => t.categoryId);
 }
 
 // ---------------------------------------------------------------
@@ -551,9 +558,19 @@ client.on(Events.InteractionCreate, async interaction => {
 
       await interaction.deferReply({ ephemeral: true });
 
+      // Per-type config
+      const typeConfig = config.ticketTypes[typeKey];
+      if (!typeConfig || !typeConfig.categoryId) {
+        return interaction.editReply({
+          content: `Tip tiketa \`${typeKey}\` nije konfigurisan u config.js.`
+        });
+      }
+      const typeCategoryId = typeConfig.categoryId;
+      const typeStaffRoleIds = typeConfig.staffRoleIds || [];
+
       // Provjeri da user nema vec tiket istog tipa (aktivan ILI arhiviran)
       const existing = interaction.guild.channels.cache.find(ch => {
-        if (ch.parentId !== config.ticketCategoryId) return false;
+        if (ch.parentId !== typeCategoryId) return false;
         const info = getTicketInfo(ch);
         if (!info) return false;
         return (
@@ -589,7 +606,7 @@ client.on(Events.InteractionCreate, async interaction => {
             PermissionFlagsBits.EmbedLinks
           ]
         },
-        ...config.staffRoleIds.map(roleId => ({
+        ...typeStaffRoleIds.map(roleId => ({
           id: roleId,
           allow: [
             PermissionFlagsBits.ViewChannel,
@@ -607,19 +624,20 @@ client.on(Events.InteractionCreate, async interaction => {
         .create({
           name: `${type.prefix}-${interaction.user.username}`.toLowerCase(),
           type: ChannelType.GuildText,
-          parent: config.ticketCategoryId || null,
+          parent: typeCategoryId,
           topic: `owner:${interaction.user.id} tip:${typeKey}`,
           permissionOverwrites: overwrites
         })
         .catch(err => {
           console.error("Greska pri kreiranju kanala:", err);
-          return null;
+          return { __error: err };
         });
 
-      if (!channel) {
+      if (!channel || channel.__error) {
+        const errMsg = channel && channel.__error ? String(channel.__error.message || channel.__error) : "nepoznato";
         return interaction.editReply({
           content:
-            "Nisam uspio kreirat kanal. Provjeri da li je `ticketCategoryId` ispravan i da li bot ima permissions."
+            `Nisam uspio kreirat kanal.\nKategorija: \`${typeCategoryId}\`\nGreska: \`${errMsg}\`\nProvjeri da bot ima **Manage Channels** permisiju u toj kategoriji.`
         });
       }
 
@@ -638,7 +656,7 @@ client.on(Events.InteractionCreate, async interaction => {
           .setStyle(ButtonStyle.Danger)
       );
 
-      const staffMentions = config.staffRoleIds
+      const staffMentions = typeStaffRoleIds
         .map(r => `<@&${r}>`)
         .join(" ");
 
