@@ -96,6 +96,30 @@ U Discordu, dok je bot online:
    - Brise kanal za 5 sekundi
 
 ## Napomena o staff welcome poruci
-
 Bot detektira kad bilo ko doda rolu `staffRoleId` nekom korisniku (bilo da to radis rucno,
 preko `/role` komande drugog bota, itd.) i odmah salje welcome u `staffWelcomeChannelId`.
+## 8. Deploy na Railway
+Git repo je vec inicijaliziran. Da postavis na Railway:
+### Varijanta A - preko GitHub-a (preporuceno)
+1. Napravi prazan repo na GitHub-u (npr. `novi-bot`)
+2. Povezi lokalni repo s GitHub-om:
+   ```
+   git -C "C:\Users\kneze\Desktop\novi-bot" remote add origin https://github.com/KORISNICKO_IME/novi-bot.git
+   git -C "C:\Users\kneze\Desktop\novi-bot" push -u origin main
+   ```
+3. Na https://railway.app -> **New Project** -> **Deploy from GitHub repo** -> izaberi `novi-bot`
+4. U Railway projekt -> **Variables** dodaj:
+   - `BOT_TOKEN`
+   - `CLIENT_ID`
+   - `GUILD_ID`
+5. Kad savesh variables, Railway automatski redeployja. Bot ce se podic + sam registrirat slash komande.
+### Varijanta B - preko Railway CLI
+1. Instaliraj CLI: `npm i -g @railway/cli`
+2. `railway login`
+3. U folderu `novi-bot`: `railway init` pa `railway up`
+4. U Railway dashboardu dodaj Variables (BOT_TOKEN, CLIENT_ID, GUILD_ID)
+### Vazno za Railway
+- Koristi **Background Worker** service (ne Web), jer bot ne slusa HTTP port. Railway ce to sam prepoznat preko `Procfile` (`worker: node index.js`).
+- Slash komande se REGISTRIRAJU AUTOMATSKI pri svakom pokretanju bota, ne moras rucno pokretat `deploy-commands.js`.
+- `.env` NIJE u gitu (`.gitignore` ga ignorira), pa **OBAVEZNO** postavi varijable u Railway **Variables** tabu.
+- Ako mijenjas ID-eve u `config.js`, commit + push -> Railway automatski redeployja.
