@@ -550,7 +550,7 @@ client.on(Events.GuildMemberAdd, async member => {
       .setColor(config.colors.success)
       .setTitle("Dobrodosli!")
       .setDescription(
-        `Dobrodosli ${member} u server!\n\n` +
+        `Dobrodosli ${member} u server! Procitaj te pravila.-><#${config.rulesChannelId}>\n\n` +
           `U slucaju da imate neko pitanje, molbu ili zelju otvorite ticket ovdje <#${config.ticketPanelChannelId}>.`
       )
       .setThumbnail(member.user.displayAvatarURL({ size: 256 }));
