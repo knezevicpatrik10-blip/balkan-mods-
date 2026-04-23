@@ -44,7 +44,7 @@ const client = new Client({
 // ---------------------------------------------------------------
 const TICKET_TYPES = {
   donacije: {
-    label: "Donacije",
+    label: "DONACIJE",
     emoji: null,
     style: ButtonStyle.Success,
     prefix: "donacija",
@@ -53,7 +53,7 @@ const TICKET_TYPES = {
       "Hvala sto zelis donirat. Opisi ukratko kakvu donaciju radis i staff ce ti odgovorit u najkracem mogucem roku."
   },
   prijave: {
-    label: "Prijave za staff",
+    label: "PRIJAVE ZA STAFF",
     emoji: null,
     style: ButtonStyle.Primary,
     prefix: "prijava",
@@ -62,7 +62,7 @@ const TICKET_TYPES = {
       "Napisi prijavu za staff. Ukljuci: godine, koliko si aktivan, tvoje iskustvo i zasto zelis bit staff."
   },
   ostalo: {
-    label: "Ostali tiketi",
+    label: "OSTALI TIKETI",
     emoji: null,
     style: ButtonStyle.Secondary,
     prefix: "tiket",
@@ -154,7 +154,7 @@ function buildTicketPanel() {
     const btn = new ButtonBuilder().setCustomId(`ticket_create_${key}`);
     if (isClosed) {
       btn
-        .setLabel(`${t.label} (zatvoreno)`)
+        .setLabel(`${t.label} (ZATVORENO)`)
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(true);
     } else {
