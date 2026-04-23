@@ -550,7 +550,7 @@ client.on(Events.GuildMemberAdd, async member => {
       .setColor(config.colors.success)
       .setTitle("Dobrodosli!")
       .setDescription(
-        `Dobrodosli ${member} u server! Procitaj te pravila.-><#${config.rulesChannelId}>\n\n` +
+        `Dobrodosli ${member} u server! Procitaj te pravila.<#${config.rulesChannelId}>\n\n` +
           `U slucaju da imate neko pitanje, molbu ili zelju otvorite ticket ovdje <#${config.ticketPanelChannelId}>.`
       )
       .setThumbnail(member.user.displayAvatarURL({ size: 256 }));
@@ -820,13 +820,12 @@ client.on(Events.InteractionCreate, async interaction => {
       }
       try {
         if (interaction.member.roles.cache.has(roleId)) {
-          await interaction.member.roles.remove(roleId, "Verify toggle");
           return interaction.reply({
-            content: "Uklonjena ti je verify rola.",
+            content: "Vec imas verify rolu.",
             ephemeral: true
           });
         }
-        await interaction.member.roles.add(roleId, "Verify toggle");
+        await interaction.member.roles.add(roleId, "Verify klik");
         return interaction.reply({
           content: "Dobio si verify rolu. Dobrodosao!",
           ephemeral: true
@@ -1047,8 +1046,7 @@ client.on(Events.InteractionCreate, async interaction => {
         .setColor(config.colors.info)
         .setTitle("Verifikacija")
         .setDescription(
-          "Klikni na **kvacicu** ispod da dobijes pristup serveru.\n" +
-            "Ako kliknes ponovo, rola ce ti biti uklonjena."
+          "Klikni na **kvacicu** ispod da dobijes pristup serveru."
         );
 
       const row = new ActionRowBuilder().addComponents(
