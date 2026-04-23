@@ -206,7 +206,7 @@ function buildRulesEmbed() {
     )
     .addFields(
       {
-        name: "1. Postivanje clanova",
+        name: "1. Postovanje clanova",
         value:
           "Ponasaj se prema drugima onako kako bi zelio da se ponasaju prema tebi. Zabranjeno vrijedjanje, omalovazavanje i provociranje."
       },
@@ -449,6 +449,19 @@ const slashCommands = [
         .setRequired(false)
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDMPermission(false),
+
+  new SlashCommandBuilder()
+    .setName("setup-verify")
+    .setDescription("Postavi verify panel (dugme s kvacicom za rolu)")
+    .addChannelOption(opt =>
+      opt
+        .setName("kanal")
+        .setDescription("Kanal u koji ide panel (opciono - inace iz configa)")
+        .addChannelTypes(ChannelType.GuildText)
+        .setRequired(false)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .setDMPermission(false)
 ].map(c => c.toJSON());
 
@@ -516,6 +529,15 @@ client.on(Events.GuildMemberAdd, async member => {
   // Azuriraj broj ljudi (samo ako nije bot)
   if (!member.user.bot) {
     updateMemberCountPresence();
+  }
+
+  // AUTO-ROLA - svakom novom clanu dodaj rolu iz configa
+  if (config.autoRoleId && !member.user.bot) {
+    try {
+      await member.roles.add(config.autoRoleId, "Auto rola na join");
+    } catch (err) {
+      console.error("Greska pri dodavanju auto role:", err);
+    }
   }
 
   try {
@@ -786,6 +808,37 @@ client.on(Events.InteractionCreate, async interaction => {
         components: []
       });
     }
+
+    // Verify panel - klik na kvacicu za rolu
+    if (id === "verify_click") {
+      const roleId = config.verifyPanel && config.verifyPanel.roleId;
+      if (!roleId) {
+        return interaction.reply({
+          content: "Verify panel nije konfigurisan u config.js",
+          ephemeral: true
+        });
+      }
+      try {
+        if (interaction.member.roles.cache.has(roleId)) {
+          await interaction.member.roles.remove(roleId, "Verify toggle");
+          return interaction.reply({
+            content: "Uklonjena ti je verify rola.",
+            ephemeral: true
+          });
+        }
+        await interaction.member.roles.add(roleId, "Verify toggle");
+        return interaction.reply({
+          content: "Dobio si verify rolu. Dobrodosao!",
+          ephemeral: true
+        });
+      } catch (err) {
+        console.error("Greska pri verify toggle:", err);
+        return interaction.reply({
+          content: `Nisam mogao dodat rolu: \`${err.message}\`. Provjeri da je bot iznad te role u hijerarhiji.`,
+          ephemeral: true
+        });
+      }
+    }
   }
 
   // -------- SLASH COMMANDI --------
@@ -960,6 +1013,54 @@ client.on(Events.InteractionCreate, async interaction => {
       await target.send({ embeds: [buildRulesEmbed()] });
       return interaction.reply({
         content: `Pravila postavljena u ${target}.`,
+        ephemeral: true
+      });
+    }
+
+    if (cmd === "setup-verify") {
+      if (
+        !interaction.member.permissions.has(
+          PermissionFlagsBits.ManageGuild
+        )
+      ) {
+        return interaction.reply({
+          content: "Nemas permisiju za ovu komandu.",
+          ephemeral: true
+        });
+      }
+
+      const target =
+        interaction.options.getChannel("kanal") ||
+        (await interaction.guild.channels
+          .fetch(config.verifyPanel.channelId)
+          .catch(() => null));
+
+      if (!target || !target.isTextBased()) {
+        return interaction.reply({
+          content:
+            "Verify kanal nije pronadjen. Provjeri `verifyPanel.channelId` u configu.",
+          ephemeral: true
+        });
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(config.colors.info)
+        .setTitle("Verifikacija")
+        .setDescription(
+          "Klikni na **kvacicu** ispod da dobijes pristup serveru.\n" +
+            "Ako kliknes ponovo, rola ce ti biti uklonjena."
+        );
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId("verify_click")
+          .setEmoji("\u2705") // kvacica
+          .setStyle(ButtonStyle.Success)
+      );
+
+      await target.send({ embeds: [embed], components: [row] });
+      return interaction.reply({
+        content: `Verify panel postavljen u ${target}.`,
         ephemeral: true
       });
     }

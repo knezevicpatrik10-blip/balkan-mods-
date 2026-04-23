@@ -50,6 +50,15 @@ module.exports = {
     "1495814689341444227"
   ],
 
+  // Rola koja se AUTOMATSKI dodaje svakom novom clanu kad udje na server
+  autoRoleId: "1496857617912561746",
+
+  // VERIFY panel - kanal + rola koju user dobije klikom na kvacicu
+  verifyPanel: {
+    channelId: "1496858118141775933",
+    roleId: "1472169594478137417"
+  },
+
   // Boje za embed poruke (hex)
   colors: {
     primary: 0x2f3136,
