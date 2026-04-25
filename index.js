@@ -195,6 +195,46 @@ async function refreshTicketPanel() {
 }
 
 // ---------------------------------------------------------------
+// Helper: embed sa donacijama i nacinima placanja
+// ---------------------------------------------------------------
+function buildDonacijeEmbed() {
+  return new EmbedBuilder()
+    .setColor(config.colors.success)
+    .setTitle("Donacije")
+    .setDescription(
+      "Hvala sto razmisljas o donaciji. Ispod je lista svih dostupnih donacija sa cijenama i nacinima placanja.\n" +
+        "Za narudzbu otvori ticket pod **DONACIJE** dugmetom u ticket panelu."
+    )
+    .addFields(
+      {
+        name: "Vrste donacija",
+        value:
+          "```\n" +
+          "Custom reshade preset       5$\n" +
+          "Custom citizen             10$\n" +
+          "Custom soundpack           10$\n" +
+          "Custom skinpack             5$\n" +
+          "```"
+      },
+      {
+        name: "Nacini placanja",
+        value: "PayPal\nPaysafe\nAircash",
+        inline: true
+      },
+      {
+        name: "Kako narucit",
+        value:
+          `1. Otvori ticket u <#${config.ticketPanelChannelId}>\n` +
+          "2. Izaberi **DONACIJE** dugme\n" +
+          "3. Napisi koju donaciju zelis i nacin placanja\n" +
+          "4. Staff ce ti odgovorit u najkracem mogucem roku",
+        inline: true
+      }
+    )
+    .setFooter({ text: "Sve donacije se rade rucno - sacekaj odgovor staffa." });
+}
+
+// ---------------------------------------------------------------
 // Helper: napravi embed s pravilima
 // ---------------------------------------------------------------
 function buildRulesEmbed() {
@@ -458,6 +498,19 @@ const slashCommands = [
       opt
         .setName("kanal")
         .setDescription("Kanal u koji ide panel (opciono - inace iz configa)")
+        .addChannelTypes(ChannelType.GuildText)
+        .setRequired(false)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDMPermission(false),
+
+  new SlashCommandBuilder()
+    .setName("setup-donacije")
+    .setDescription("Postavi embed sa cijenama donacija i nacinima placanja")
+    .addChannelOption(opt =>
+      opt
+        .setName("kanal")
+        .setDescription("Kanal u koji ide embed (opciono - inace trenutni)")
         .addChannelTypes(ChannelType.GuildText)
         .setRequired(false)
     )
@@ -818,16 +871,26 @@ client.on(Events.InteractionCreate, async interaction => {
           ephemeral: true
         });
       }
+      const unverifiedRoleId = config.autoRoleId;
       try {
         if (interaction.member.roles.cache.has(roleId)) {
+          // Vec verify-an: skidamo member rolu, vracamo unverified rolu
+          await interaction.member.roles.remove(roleId, "Verify toggle off");
+          if (unverifiedRoleId) {
+            await interaction.member.roles.add(unverifiedRoleId, "Verify toggle off - vracam unverified").catch(() => {});
+          }
           return interaction.reply({
-            content: "Vec imas verify rolu.",
+            content: "Skinuta ti je member rola, vracena unverified rola.",
             ephemeral: true
           });
         }
+        // Nije verify-an: dodajemo member rolu, skidamo unverified
         await interaction.member.roles.add(roleId, "Verify klik");
+        if (unverifiedRoleId && interaction.member.roles.cache.has(unverifiedRoleId)) {
+          await interaction.member.roles.remove(unverifiedRoleId, "Verify klik - skidam unverified").catch(() => {});
+        }
         return interaction.reply({
-          content: "Dobio si verify rolu. Dobrodosao!",
+          content: "Dobio si member rolu. Dobrodosao!",
           ephemeral: true
         });
       } catch (err) {
@@ -1046,7 +1109,8 @@ client.on(Events.InteractionCreate, async interaction => {
         .setColor(config.colors.info)
         .setTitle("Verifikacija")
         .setDescription(
-          "Klikni na **kvacicu** ispod da dobijes pristup serveru."
+          "Klikni na **kvacicu** ispod da dobijes pristup serveru.\n" +
+            "Ako kliknes ponovo, member rola se uklanja i vraca ti unverified rola."
         );
 
       const row = new ActionRowBuilder().addComponents(
@@ -1059,6 +1123,33 @@ client.on(Events.InteractionCreate, async interaction => {
       await target.send({ embeds: [embed], components: [row] });
       return interaction.reply({
         content: `Verify panel postavljen u ${target}.`,
+        ephemeral: true
+      });
+    }
+
+    if (cmd === "setup-donacije") {
+      if (
+        !interaction.member.permissions.has(
+          PermissionFlagsBits.ManageGuild
+        )
+      ) {
+        return interaction.reply({
+          content: "Nemas permisiju za ovu komandu.",
+          ephemeral: true
+        });
+      }
+
+      const target = interaction.options.getChannel("kanal") || interaction.channel;
+      if (!target.isTextBased()) {
+        return interaction.reply({
+          content: "Meta mora biti tekstualni kanal.",
+          ephemeral: true
+        });
+      }
+
+      await target.send({ embeds: [buildDonacijeEmbed()] });
+      return interaction.reply({
+        content: `Donacije embed postavljen u ${target}.`,
         ephemeral: true
       });
     }
