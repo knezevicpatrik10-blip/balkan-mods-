@@ -219,9 +219,9 @@ function buildDonacijeEmbed() {
       {
         name: "Nacini placanja",
         value:
-          "<:PayPal_Logo:1325623623347605574> PayPal\n" +
-          "<:PaySafe:1444492240964554794> Paysafe\n" +
-          "<:aircash:1307328352872304720> Aircash",
+          "<:kurac2removebgpreview:1497909571480719501> PayPal\n" +
+          "<:kurac3removebgpreview:1497909611389255780> Paysafe\n" +
+          "<:kuracremovebgpreview:1497908887259578439> Aircash",
         inline: true
       },
       {
