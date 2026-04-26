@@ -218,7 +218,10 @@ function buildDonacijeEmbed() {
       },
       {
         name: "Nacini placanja",
-        value: "PayPal\nPaysafe\nAircash",
+        value:
+          "<:PayPal_Logo:1325623623347605574> PayPal\n" +
+          "<:PaySafe:1444492240964554794> Paysafe\n" +
+          "<:aircash:1307328352872304720> Aircash",
         inline: true
       },
       {
@@ -874,29 +877,29 @@ client.on(Events.InteractionCreate, async interaction => {
       const unverifiedRoleId = config.autoRoleId;
       try {
         if (interaction.member.roles.cache.has(roleId)) {
-          // Vec verify-an: skidamo member rolu, vracamo unverified rolu
+          // Vec verify-an: skidamo member rol, vracamo unverified rol
           await interaction.member.roles.remove(roleId, "Verify toggle off");
           if (unverifiedRoleId) {
             await interaction.member.roles.add(unverifiedRoleId, "Verify toggle off - vracam unverified").catch(() => {});
           }
           return interaction.reply({
-            content: "Skinuta ti je member rola, vracena unverified rola.",
+            content: "Skinut ti je member rol, vracen unverified rol.",
             ephemeral: true
           });
         }
-        // Nije verify-an: dodajemo member rolu, skidamo unverified
+        // Nije verify-an: dodajemo member rol, skidamo unverified
         await interaction.member.roles.add(roleId, "Verify klik");
         if (unverifiedRoleId && interaction.member.roles.cache.has(unverifiedRoleId)) {
           await interaction.member.roles.remove(unverifiedRoleId, "Verify klik - skidam unverified").catch(() => {});
         }
         return interaction.reply({
-          content: "Dobio si member rolu. Dobrodosao!",
+          content: "Dobio si member rol. Dobrodosao!",
           ephemeral: true
         });
       } catch (err) {
         console.error("Greska pri verify toggle:", err);
         return interaction.reply({
-          content: `Nisam mogao dodat rolu: \`${err.message}\`. Provjeri da je bot iznad te role u hijerarhiji.`,
+          content: `Nisam mogao dodat rol: \`${err.message}\`. Provjeri da je bot iznad tog rola u hijerarhiji.`,
           ephemeral: true
         });
       }
@@ -1110,7 +1113,7 @@ client.on(Events.InteractionCreate, async interaction => {
         .setTitle("Verifikacija")
         .setDescription(
           "Klikni na **kvacicu** ispod da dobijes pristup serveru.\n" +
-            "Ako kliknes ponovo, member rola se uklanja i vraca ti unverified rola."
+            "Ako kliknes ponovo, member rol se uklanja i vraca ti unverified rol."
         );
 
       const row = new ActionRowBuilder().addComponents(
